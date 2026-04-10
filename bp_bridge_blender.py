@@ -12,6 +12,8 @@ import bpy
 import os
 import subprocess
 
+
+
 def update_all_meshes(self, context):
     if self.my_bool_all_meshes:
         self.my_bool_selection = False
@@ -51,7 +53,8 @@ class BPSettings(bpy.types.PropertyGroup):
 
     output_path : bpy.props.StringProperty(
         name = "Output path",
-        description = "Path where exported files will be saved."
+        description = "Path where exported files will be saved.",
+        subtype = "FILE_PATH"
     )
 
     spp_project : bpy.props.EnumProperty(
@@ -123,8 +126,6 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
 
         box_setup.prop(settings, "output_path")
 
-
-
         # SP PROJECT
         layout.label(text="Substance Painter project")
         box_project = layout.box()
@@ -150,10 +151,6 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         state_btns_row = box_states.row()
         state_btns_row.operator("bl.save_state", text="Save State")
         state_btns_row.operator("bl.load_state", text="Load State")
-        #
-        # box_states.operator("bl.save_state", text="Save State")
-        # box_states.operator("bl.load_state", text="Load State")
-
 
 
 class CheckChanges(bpy.types.Operator):
@@ -191,29 +188,34 @@ class ExportAndBake(bpy.types.Operator):
             elif suffix_high in obj.name:
                 high_poly_parts.append(obj)
         
-        blend_direct = os.path.dirname(bpy.data.filepath)
-        output_folder_name = bpy.path.basename(bpy.context.blend_data.filepath).replace(".blend", "") + "_output"
-        output_directory = os.path.join(blend_direct, output_folder_name)
+        # blend_direct = os.path.dirname(bpy.data.filepath)
+        # output_folder_name = bpy.path.basename(bpy.context.blend_data.filepath).replace(".blend", "") + "_output"
+        output_directory = os.path.join(settings.output_path, "bp_bridge_output")
         
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
         
         bpy.ops.object.select_all(action='DESELECT')
+
+        if bpy.data.filepath:
+            assetname = bpy.path.basename(bpy.context.blend_data.filepath).replace(".blend", "") # name of file
+        else:
+            assetname = "exported_asset"
         
         # export low poly    
         for lp_part in low_poly_parts:
             lp_part.select_set(True)
-        filename = os.path.join(output_directory, settings.base_name) + "_low.fbx"
+        filename = os.path.join(output_directory, assetname) + "_low.fbx"
         bpy.ops.export_scene.fbx(filepath=filename, use_selection=True, use_triangles=True)
-        
+
         bpy.ops.object.select_all(action='DESELECT')
-        
+
         # export high poly
         for hp_part in high_poly_parts:
             hp_part.select_set(True)
-        filename = os.path.join(output_directory, settings.base_name) + "_high.fbx"
+        filename = os.path.join(output_directory, assetname) + "_high.fbx"
         bpy.ops.export_scene.fbx(filepath=filename, use_selection=True, use_mesh_modifiers=True)
-        
+
         bpy.ops.object.select_all(action='DESELECT')
 
         print(f"Low poly: {low_poly_parts}")
