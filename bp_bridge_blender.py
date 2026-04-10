@@ -4,7 +4,6 @@ bl_info = {
     "version": (1,0),
     "blender": (4,4,3),
     "location": "View3d > Tool",
-    "warning": "Blend file must be saved in order for the script to work. Exported models will be saved in the same directory.",
     "wiki_url": "https://www.artstation.com/jelenarombouts2",
     "category": "Import-Export"
     }
@@ -12,10 +11,6 @@ bl_info = {
 import bpy
 import os
 import subprocess
-
-print("I am a super cool adjustment")
-
-PAINTER_EXE = r"C:\Program Files\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"
 
 def update_all_meshes(self, context):
     if self.my_bool_all_meshes:
@@ -26,20 +21,15 @@ def update_selection(self, context):
         self.my_bool_all_meshes = False
 
 class BPSettings(bpy.types.PropertyGroup):
-    
-    my_bool_all_meshes : bpy.props.BoolProperty(
-        name = "All meshes in scene",
-        description = "When True, the add-on will take into account all meshes in the scene.",
-        default = True,
-        update = update_all_meshes
-        )
-        
-    my_bool_selection : bpy.props.BoolProperty(
-        name = "Based on selection",
-        description = "When True, the add-on will only take into account the meshes that are selected.",
-        default = False,
-        update = update_selection
-        )
+
+    scope_mode : bpy.props.EnumProperty(
+        name = "Scope",
+        items = [
+            ('Selected', "Selected", "Use all selected meshes"),
+            ('All', "All", "Use all meshes in the scene"),
+        ],
+        default = "Selected"
+    )
         
     base_name : bpy.props.StringProperty(
         name = "Asset base name",
@@ -58,13 +48,53 @@ class BPSettings(bpy.types.PropertyGroup):
         description = "Suffix of meshes that add-on will export as part of the high poly mesh.",
         default = "_high"
         )
+
+    output_path : bpy.props.StringProperty(
+        name = "Output path",
+        description = "Path where exported files will be saved."
+    )
+
+    spp_project : bpy.props.EnumProperty(
+        name = "spp_project",
+        items = [
+            ("UseOpen", "Use Open", "Use currently opened Substance Painter project for baking"),
+            ("New", "Use New", "Open new Substance Painter project for baking"),
+        ]
+    )
+
+    bake_normal_map : bpy.props.BoolProperty(
+        name = "Normal",
+        description = "Bake normal map",
+        default = True
+    )
+
+    bake_ao_map : bpy.props.BoolProperty(
+        name = "Ambient Occlusion",
+        description = "Bake ambient occlusion map",
+        default = False
+    )
+
+    bake_curvature_map : bpy.props.BoolProperty(
+        name = "Curvature",
+        description = "Bake curvature map",
+        default = False
+    )
+
+    mesh_states : bpy.props.EnumProperty(
+        name = "Mesh States",
+        items = [
+            ("state_1", "State 1", "First mesh state"),
+            ("state 2", "State 2", "Second mesh state"),
+            ("state_3", "State 3", "Third mesh state")
+        ]
+    )
         
-    painter_path : bpy.props.StringProperty(
-        name = "Substance Painter project path",
-        description = "The path to the .spp file you want the mesh maps to be updated from with the new ones from the bake.",
-        default = "...",
-        subtype='FILE_PATH'
-        )
+    # painter_path : bpy.props.StringProperty(
+    #     name = "Substance Painter project path",
+    #     description = "The path to the .spp file you want the mesh maps to be updated from with the new ones from the bake.",
+    #     default = "...",
+    #     subtype='FILE_PATH'
+    #     )
 
 class BlenderPainterBridge_PT_Main(bpy.types.Panel):
     
@@ -78,42 +108,76 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         settings = context.scene.bp_settings
-        
-        row = layout.row()
-        layout.prop(settings, "my_bool_all_meshes")
-        row = layout.row()
-        layout.prop(settings, "my_bool_selection")
-        row = layout.row()
-        layout.prop(settings, "base_name")
-        row = layout.row()
-        layout.prop(settings, "suffix_low")
-        row = layout.row()
-        layout.prop(settings, "suffix_high")
-        row = layout.row()
-        row.operator("bl.export_high_low", text="Export meshes")
-        row = layout.row()
-        layout.prop(settings, "painter_path")
-        row = layout.row()
-        
-        row.operator("bl.open_spp", text="Open Substance Painter Project")
-        
-class ExportMeshes(bpy.types.Operator):
-    bl_idname = "bl.export_high_low"
+
+        # SETUP
+        layout.label(text="Setup")
+        box_setup = layout.box()
+
+        scope_row = box_setup.row()
+        scope_row.label(text="Objects:")
+        scope_row.prop_enum(settings, "scope_mode", "Selected")
+        scope_row.prop_enum(settings, "scope_mode", "All")
+
+        box_setup.prop(settings, "suffix_low")
+        box_setup.prop(settings, "suffix_high")
+
+        box_setup.prop(settings, "output_path")
+
+
+
+        # SP PROJECT
+        layout.label(text="Substance Painter project")
+        box_project = layout.box()
+        project_row = box_project.row()
+        project_row.prop_enum(settings, "spp_project", "UseOpen")
+        project_row.prop_enum(settings, "spp_project", "New")
+
+        # BAKING
+        layout.label(text="Baking")
+        box_baking = layout.box()
+        box_baking.label(text="Mesh maps:")
+        box_baking.prop(settings, "bake_normal_map")
+        box_baking.prop(settings, "bake_ao_map")
+        box_baking.prop(settings, "bake_curvature_map")
+
+        box_baking.operator("bl.check_changes", text="Check Changes", icon="VIEWZOOM")
+        box_baking.operator("bl.export_and_bake", text="Export and Bake", icon="CHECKMARK")
+
+        # MESH STATES
+        layout.label(text="Mesh States")
+        box_states = layout.box()
+        box_states.prop(settings, "mesh_states")
+        state_btns_row = box_states.row()
+        state_btns_row.operator("bl.save_state", text="Save State")
+        state_btns_row.operator("bl.load_state", text="Load State")
+        #
+        # box_states.operator("bl.save_state", text="Save State")
+        # box_states.operator("bl.load_state", text="Load State")
+
+
+
+class CheckChanges(bpy.types.Operator):
+    bl_idname = "bl.check_changes"
+    bl_label = "CheckChanges"
+
+    def execute(self, context):
+        print("Changes checked")
+
+class ExportAndBake(bpy.types.Operator):
+    bl_idname = "bl.export_and_bake"
     bl_label = "ExportMeshes"
     
     def execute(self, context):
-        print("Export Meshes executed!")
+        print("Export and Bake executed")
         
         mesh_parts_to_export = []
         settings = context.scene.bp_settings
         
-        if settings.my_bool_all_meshes:
-            
+        if settings.scope_mode == "All":
             mesh_parts_to_export = [o for o in context.scene.objects if o.type == 'MESH']
             print(mesh_parts_to_export)
             
-        elif settings.my_bool_selection:
-            
+        elif settings.scope_mode == "Selected":
             mesh_parts_to_export = [o for o in bpy.context.selected_objects if o.type == "MESH"]
             print(mesh_parts_to_export)
             
@@ -156,39 +220,61 @@ class ExportMeshes(bpy.types.Operator):
         print(f"High poly: {high_poly_parts}")
         
         return {"FINISHED"}
-    
-class OpenSubstancePainter(bpy.types.Operator):
-    bl_idname = "bl.open_spp"
-    bl_label = "Open Substance Painter Project"
+
+class SaveState(bpy.types.Operator):
+    bl_idname = "bl.save_state"
+    bl_label = "SaveState"
 
     def execute(self, context):
-        settings = context.scene.bp_settings
-        spp_path = bpy.path.abspath(settings.painter_path)
+        print("State saved")
+        return {"FINISHED"}
 
-        if not spp_path.lower().endswith(".spp"):
-            self.report({'ERROR'}, "Please select a valid .spp file")
-            return {'CANCELLED'}
+class LoadState(bpy.types.Operator):
+    bl_idname = "bl.load_state"
+    bl_label = "LoadState"
 
-        if not os.path.exists(spp_path):
-            self.report({'ERROR'}, "File does not exist")
-            return {'CANCELLED'}
-
-        subprocess.Popen([PAINTER_EXE, spp_path])
-        return {'FINISHED'}
+    def execute(self, context):
+        print("State loaded")
+        return {"FINISHED"}
+    
+# class OpenSubstancePainter(bpy.types.Operator):
+#     bl_idname = "bl.open_spp"
+#     bl_label = "Open Substance Painter Project"
+#
+#     def execute(self, context):
+#         settings = context.scene.bp_settings
+#         spp_path = bpy.path.abspath(settings.painter_path)
+#
+#         if not spp_path.lower().endswith(".spp"):
+#             self.report({'ERROR'}, "Please select a valid .spp file")
+#             return {'CANCELLED'}
+#
+#         if not os.path.exists(spp_path):
+#             self.report({'ERROR'}, "File does not exist")
+#             return {'CANCELLED'}
+#
+#         subprocess.Popen([PAINTER_EXE, spp_path])
+#         return {'FINISHED'}
     
         
 def register():
     bpy.utils.register_class(BPSettings)
-    bpy.utils.register_class(ExportMeshes)
-    bpy.utils.register_class(OpenSubstancePainter)
+    bpy.utils.register_class(CheckChanges)
+    bpy.utils.register_class(ExportAndBake)
+    bpy.utils.register_class(SaveState)
+    bpy.utils.register_class(LoadState)
+    # bpy.utils.register_class(OpenSubstancePainter)
     bpy.utils.register_class(BlenderPainterBridge_PT_Main)
     bpy.types.Scene.bp_settings = bpy.props.PointerProperty(type=BPSettings)
 
 def unregister():
     del bpy.types.Scene.bp_settings
     bpy.utils.unregister_class(BlenderPainterBridge_PT_Main)
-    bpy.utils.unregister_class(ExportMeshes)
-    bpy.utils.unregister_class(OpenSubstancePainter)
+    bpy.utils.unregister_class(CheckChanges)
+    bpy.utils.unregister_class(ExportAndBake)
+    bpy.utils.unregister_class(SaveState)
+    bpy.utils.unregister_class(LoadState)
+    # bpy.utils.unregister_class(OpenSubstancePainter)
     bpy.utils.unregister_class(BPSettings)
 
 

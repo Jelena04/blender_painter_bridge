@@ -6,11 +6,9 @@ import substance_painter.textureset as textureset
 import os
 
 
-
 class PainterBridge(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-
 
         self.setWindowTitle("Blender Painter Bridge")
 
@@ -48,7 +46,6 @@ class PainterBridge(QtWidgets.QWidget):
         self.bake_button = QtWidgets.QPushButton("Bake")
         main_layout.addWidget(self.bake_button)
         self.bake_button.clicked.connect(self.bake)
-
 
         self.low_poly_fbx = None
         self.high_poly_fbx = None
@@ -154,5 +151,5 @@ def close_plugin():
         substance_painter.ui.delete_ui_element(widget)
     plugin_widgets.clear()
 
-# if __name__ == "__main__":
-#     start_plugin()
+if __name__ == "__main__":
+    start_plugin()
