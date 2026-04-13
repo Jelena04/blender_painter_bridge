@@ -12,15 +12,31 @@ import bpy
 import os
 import subprocess
 
+from mathutils import Vector
+import json
+
+# def update_all_meshes(self, context):
+#     if self.my_bool_all_meshes:
+#         self.my_bool_selection = False
+#
+# def update_selection(self, context):
+#     if self.my_bool_selection:
+#         self.my_bool_all_meshes = False
 
 
-def update_all_meshes(self, context):
-    if self.my_bool_all_meshes:
-        self.my_bool_selection = False
+class BPMeshState(bpy.types.PropertyGroup):
+    label: bpy.props.StringProperty()
+    fbx_path: bpy.props.StringProperty()
+    json_path: bpy.props.StringProperty()
 
-def update_selection(self, context):
-    if self.my_bool_selection:
-        self.my_bool_all_meshes = False
+class BP_UL_MeshStateList(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index): # called once for each item in the collection
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            layout.prop(item, "label", text="", emboss=False)
+        elif self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text=item.label)
+
 
 class BPSettings(bpy.types.PropertyGroup):
 
@@ -83,21 +99,21 @@ class BPSettings(bpy.types.PropertyGroup):
         default = False
     )
 
-    mesh_states : bpy.props.EnumProperty(
-        name = "Mesh States",
-        items = [
-            ("state_1", "State 1", "First mesh state"),
-            ("state 2", "State 2", "Second mesh state"),
-            ("state_3", "State 3", "Third mesh state")
-        ]
+    mesh_state_name : bpy.props.StringProperty(
+        name = "Name",
+        description = "Name that mesh state should be saved with",
     )
-        
-    # painter_path : bpy.props.StringProperty(
-    #     name = "Substance Painter project path",
-    #     description = "The path to the .spp file you want the mesh maps to be updated from with the new ones from the bake.",
-    #     default = "...",
-    #     subtype='FILE_PATH'
-    #     )
+
+    mesh_states : bpy.props.CollectionProperty(
+        name = "States",
+        type = BPMeshState,
+        description = "Different saved mesh states"
+    )
+
+    mesh_states_index: bpy.props.IntProperty(
+        name="Active State Index"
+    )
+
 
 class BlenderPainterBridge_PT_Main(bpy.types.Panel):
     
@@ -117,12 +133,12 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         box_setup = layout.box()
 
         scope_row = box_setup.row()
-        scope_row.label(text="Objects:")
+        scope_row.label(text="Objects")
         scope_row.prop_enum(settings, "scope_mode", "Selected")
         scope_row.prop_enum(settings, "scope_mode", "All")
 
-        box_setup.prop(settings, "suffix_low")
-        box_setup.prop(settings, "suffix_high")
+        box_setup.prop(settings, "suffix_low", text="Suffix low")
+        box_setup.prop(settings, "suffix_high", text="Suffix high")
 
         box_setup.prop(settings, "output_path")
 
@@ -136,7 +152,7 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         # BAKING
         layout.label(text="Baking")
         box_baking = layout.box()
-        box_baking.label(text="Mesh maps:")
+        box_baking.label(text="Mesh Maps")
         box_baking.prop(settings, "bake_normal_map")
         box_baking.prop(settings, "bake_ao_map")
         box_baking.prop(settings, "bake_curvature_map")
@@ -147,10 +163,21 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         # MESH STATES
         layout.label(text="Mesh States")
         box_states = layout.box()
-        box_states.prop(settings, "mesh_states")
+        box_states.prop(settings, "mesh_state_name", text="Name")
+        # box_states.prop(settings, "mesh_states", text="States")
+        box_states.template_list(
+            "BP_UL_MeshStateList",  # UIList class name
+            "",  # list ID (empty because i'm only using 1)
+            settings,  # data that holds the collection
+            "mesh_states",  # collection property name
+            settings,  # data that holds the active index
+            "mesh_states_index"  # index property name
+        )
+
         state_btns_row = box_states.row()
-        state_btns_row.operator("bl.save_state", text="Save State")
-        state_btns_row.operator("bl.load_state", text="Load State")
+        state_btns_row.operator("bl.save_state", text="Save")
+        state_btns_row.operator("bl.load_state", text="Load")
+        state_btns_row.operator("bl.remove_state", text="Remove")
 
 
 class CheckChanges(bpy.types.Operator):
@@ -188,8 +215,6 @@ class ExportAndBake(bpy.types.Operator):
             elif suffix_high in obj.name:
                 high_poly_parts.append(obj)
         
-        # blend_direct = os.path.dirname(bpy.data.filepath)
-        # output_folder_name = bpy.path.basename(bpy.context.blend_data.filepath).replace(".blend", "") + "_output"
         output_directory = os.path.join(settings.output_path, "bp_bridge_output")
         
         if not os.path.exists(output_directory):
@@ -228,14 +253,104 @@ class SaveState(bpy.types.Operator):
     bl_label = "SaveState"
 
     def execute(self, context):
+        settings = context.scene.bp_settings
+
+        to_export = []
+        if settings.scope_mode == "All":
+            to_export = [o for o in context.scene.objects if o.type == 'MESH']
+        elif settings.scope_mode == "Selected":
+            to_export = bpy.context.selected_objects
+
+        output_directory = os.path.join(settings.output_path, "bp_bridge_output")
+        for (root, dirs, files) in os.walk(output_directory, topdown=True):
+            filenames = files
+
+        if settings.mesh_state_name == "":
+            self.report({"WARNING"}, "No mesh state name chosen.")
+            return({"CANCELLED"})
+        elif f"{settings.mesh_state_name}.fbx" in filenames:
+            self.report({"WARNING"}, "Mesh state name already taken.")
+            return({"CANCELLED"})
+        else:
+            assetname = settings.mesh_state_name
+
+
+        if not os.path.exists(output_directory):
+            os.makedirs(output_directory)
+
+        filename = os.path.join(output_directory, assetname) + ".fbx"
+        bpy.ops.export_scene.fbx(filepath=filename, use_selection=True, use_mesh_modifiers=True)
+
+        bbox = self.get_bbox(to_export)
+        json_path = self.save_data(output_directory, assetname, bbox)
+
+        new_item = settings.mesh_states.add()
+        new_item.label = assetname
+        new_item.fbx_path = filename
+        new_item.json_path = json_path
+
         print("State saved")
+
         return {"FINISHED"}
+
+    def get_bbox(self, mesh_parts):
+        x_values = []
+        y_values = []
+        z_values = []
+
+        for object in mesh_parts:
+            for corner in object.bound_box:
+                world_corner = object.matrix_world @ Vector(corner)
+                x_values.append(world_corner.x)
+                y_values.append(world_corner.y)
+                z_values.append(world_corner.z)
+        total_width = max(x_values) - min(x_values)
+        total_height = max(y_values) - min(y_values)
+        total_depth = max(z_values) - min(z_values)
+
+        full_bbox = [total_width, total_height, total_depth]
+
+        return full_bbox
+
+    def save_data(self, output_directory, asset_name, bbox):
+        data = {}
+        data["bbox"] = bbox
+
+        json_filename = os.path.join(output_directory, asset_name) + ".json"
+        with open(json_filename, "w") as write_file:
+            json.dump(data, write_file)
+
+        return json_filename
+
 
 class LoadState(bpy.types.Operator):
     bl_idname = "bl.load_state"
     bl_label = "LoadState"
 
     def execute(self, context):
+        settings = context.scene.bp_settings
+
+        selected_state = settings.mesh_states_index
+
+        bpy.ops.import_scene.fbx(filepath=settings.mesh_states[selected_state].fbx_path)
+
+        print("State loaded")
+        return {"FINISHED"}
+
+class RemoveState(bpy.types.Operator):
+    bl_idname = "bl.remove_state"
+    bl_label = "RemoveState"
+
+    def execute(self, context):
+        settings = context.scene.bp_settings
+
+        selected_state = settings.mesh_states_index
+        if settings.mesh_states[selected_state].fbx_path:
+            os.remove(settings.mesh_states[selected_state].fbx_path)
+        settings.mesh_states.remove(selected_state)
+
+
+
         print("State loaded")
         return {"FINISHED"}
     
@@ -260,22 +375,28 @@ class LoadState(bpy.types.Operator):
     
         
 def register():
+    bpy.utils.register_class(BPMeshState)
+    bpy.utils.register_class(BP_UL_MeshStateList)
     bpy.utils.register_class(BPSettings)
     bpy.utils.register_class(CheckChanges)
     bpy.utils.register_class(ExportAndBake)
     bpy.utils.register_class(SaveState)
     bpy.utils.register_class(LoadState)
+    bpy.utils.register_class(RemoveState)
     # bpy.utils.register_class(OpenSubstancePainter)
     bpy.utils.register_class(BlenderPainterBridge_PT_Main)
     bpy.types.Scene.bp_settings = bpy.props.PointerProperty(type=BPSettings)
 
 def unregister():
+    bpy.utils.unregister_class(BPMeshState)
+    bpy.utils.UNregister_class(BP_UL_MeshStateList)
     del bpy.types.Scene.bp_settings
     bpy.utils.unregister_class(BlenderPainterBridge_PT_Main)
     bpy.utils.unregister_class(CheckChanges)
     bpy.utils.unregister_class(ExportAndBake)
     bpy.utils.unregister_class(SaveState)
     bpy.utils.unregister_class(LoadState)
+    bpy.utils.unregister_class(RemoveState)
     # bpy.utils.unregister_class(OpenSubstancePainter)
     bpy.utils.unregister_class(BPSettings)
 
