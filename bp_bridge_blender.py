@@ -9,19 +9,13 @@ bl_info = {
     }
 
 import bpy
+from bpy_extras import bmesh_utils
+import bmesh
 import os
 import subprocess
 
 from mathutils import Vector
 import json
-
-# def update_all_meshes(self, context):
-#     if self.my_bool_all_meshes:
-#         self.my_bool_selection = False
-#
-# def update_selection(self, context):
-#     if self.my_bool_selection:
-#         self.my_bool_all_meshes = False
 
 
 class BPMeshState(bpy.types.PropertyGroup):
@@ -36,7 +30,6 @@ class BP_UL_MeshStateList(bpy.types.UIList):
         elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             layout.label(text=item.label)
-
 
 class BPSettings(bpy.types.PropertyGroup):
 
@@ -214,7 +207,7 @@ class ExportAndBake(bpy.types.Operator):
                 low_poly_parts.append(obj)
             elif suffix_high in obj.name:
                 high_poly_parts.append(obj)
-        
+
         output_directory = os.path.join(settings.output_path, "bp_bridge_output")
         
         if not os.path.exists(output_directory):
@@ -274,15 +267,21 @@ class SaveState(bpy.types.Operator):
         else:
             assetname = settings.mesh_state_name
 
-
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
 
+        try:
+            bbox = self.get_bbox(to_export)
+            materials = self.get_materials(to_export)
+            uv_islands = self.get_uv_islands(to_export)
+            print(f"UV islands: {uv_islands}")
+            json_path = self.save_data(output_directory, assetname, bbox, materials, uv_islands)
+        except Exception as e:
+            self.report({"ERROR"}, "Failed to save mesh state.")
+            return({"CANCELLED"})
+
         filename = os.path.join(output_directory, assetname) + ".fbx"
         bpy.ops.export_scene.fbx(filepath=filename, use_selection=True, use_mesh_modifiers=True)
-
-        bbox = self.get_bbox(to_export)
-        json_path = self.save_data(output_directory, assetname, bbox)
 
         new_item = settings.mesh_states.add()
         new_item.label = assetname
@@ -294,28 +293,63 @@ class SaveState(bpy.types.Operator):
         return {"FINISHED"}
 
     def get_bbox(self, mesh_parts):
-        x_values = []
-        y_values = []
-        z_values = []
+        try:
+            x_values = []
+            y_values = []
+            z_values = []
 
-        for object in mesh_parts:
-            for corner in object.bound_box:
-                world_corner = object.matrix_world @ Vector(corner)
-                x_values.append(world_corner.x)
-                y_values.append(world_corner.y)
-                z_values.append(world_corner.z)
-        total_width = max(x_values) - min(x_values)
-        total_height = max(y_values) - min(y_values)
-        total_depth = max(z_values) - min(z_values)
+            for object in mesh_parts:
+                for corner in object.bound_box:
+                    world_corner = object.matrix_world @ Vector(corner)
+                    x_values.append(world_corner.x)
+                    y_values.append(world_corner.y)
+                    z_values.append(world_corner.z)
+            total_width = max(x_values) - min(x_values)
+            total_height = max(y_values) - min(y_values)
+            total_depth = max(z_values) - min(z_values)
 
-        full_bbox = [total_width, total_height, total_depth]
+            full_bbox = [total_width, total_height, total_depth]
+        except Exception as e:
+            self.report({"ERROR"}, str(e))
+            return ({"CANCELLED"})
 
         return full_bbox
 
-    def save_data(self, output_directory, asset_name, bbox):
-        data = {}
-        data["bbox"] = bbox
+    def get_materials(self, mesh_parts):
+        try:
+            materials = []
+            for object in mesh_parts:
+                for material in object.material_slots:
+                    if  material.name not in materials:
+                        materials.append(material.name)
+        except Exception as e:
+            self.report({"ERROR"}, str(e))
+            return ({"CANCELLED"})
 
+        return materials
+
+    def get_uv_islands(self, mesh_parts):
+        try:
+            islands = 0
+            for object in mesh_parts:
+                bm = bmesh.new()
+                bm.from_mesh(object.data)
+
+                uv_layer = bm.loops.layers.uv[object.data.uv_layers.active.name]
+
+                islands += len(bmesh_utils.bmesh_linked_uv_islands(bm, uv_layer))
+        except Exception as e:
+            self.report({"ERROR"}, str(e))
+            return ({"CANCELLED"})
+
+        return islands
+
+    def save_data(self, output_directory, asset_name, bbox, materials, uv_islands):
+        data = {}
+
+        data["bbox"] = bbox
+        data["materials"] = materials
+        data["uv_islands"] = uv_islands
         json_filename = os.path.join(output_directory, asset_name) + ".json"
         with open(json_filename, "w") as write_file:
             json.dump(data, write_file)
@@ -345,11 +379,13 @@ class RemoveState(bpy.types.Operator):
         settings = context.scene.bp_settings
 
         selected_state = settings.mesh_states_index
-        if settings.mesh_states[selected_state].fbx_path:
+        if os.path.exists(settings.mesh_states[selected_state].fbx_path):
             os.remove(settings.mesh_states[selected_state].fbx_path)
+
+        if os.path.exists(settings.mesh_states[selected_state].json_path):
+            os.remove(settings.mesh_states[selected_state].json_path)
+
         settings.mesh_states.remove(selected_state)
-
-
 
         print("State loaded")
         return {"FINISHED"}
