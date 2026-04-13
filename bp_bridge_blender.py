@@ -1,3 +1,5 @@
+from numpy.distutils.system_info import lapack_ilp64_opt_info
+
 bl_info = {
     "name": "Blender Painter Bridge",
     "author": "Jelena Rombouts",
@@ -17,6 +19,23 @@ import subprocess
 from mathutils import Vector
 import json
 
+class LoadConfig(bpy.types.Operator):
+    bl_idname = "bl.load_config"
+    bl_label = "Load Config"
+
+    def execute(self, context):
+        global CONFIG
+        config_path = os.path.join(os.path.dirname(__file__), "check_config.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                CONFIG = json.load(f)
+        else:
+            CONFIG = {
+                "bbox_threshold": 10,
+                "uv_islands_threshold": 2
+            }
+
+        return ({"FINISHED"})
 
 class BPMeshState(bpy.types.PropertyGroup):
     label: bpy.props.StringProperty()
@@ -107,6 +126,8 @@ class BPSettings(bpy.types.PropertyGroup):
         name="Active State Index"
     )
 
+    change_count: bpy.props.IntProperty(default=-1)
+
 
 class BlenderPainterBridge_PT_Main(bpy.types.Panel):
     
@@ -145,12 +166,24 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         # BAKING
         layout.label(text="Baking")
         box_baking = layout.box()
+        change_split = box_baking.split(factor=0.75)
+        change_split.operator("bl.check_changes", text="Check Changes", icon="VIEWZOOM")
+        change_split.operator("bl.load_config", text="Config", icon="FILE_REFRESH")
+
+        if settings.change_count >= 0:
+            status_row = box_baking.row()
+            if  settings.change_count == 0:
+                status_row.label(text="Safe to reload", icon="SEQUENCE_COLOR_04")
+            elif settings.change_count == 1:
+                status_row.label(text="Reload with caution", icon="SEQUENCE_COLOR_02")
+            else:
+                status_row.label(text="Risky to reload", icon="SEQUENCE_COLOR_01")
+
         box_baking.label(text="Mesh Maps")
         box_baking.prop(settings, "bake_normal_map")
         box_baking.prop(settings, "bake_ao_map")
         box_baking.prop(settings, "bake_curvature_map")
 
-        box_baking.operator("bl.check_changes", text="Check Changes", icon="VIEWZOOM")
         box_baking.operator("bl.export_and_bake", text="Export and Bake", icon="CHECKMARK")
 
         # MESH STATES
@@ -173,12 +206,66 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         state_btns_row.operator("bl.remove_state", text="Remove")
 
 
+
+
 class CheckChanges(bpy.types.Operator):
     bl_idname = "bl.check_changes"
     bl_label = "CheckChanges"
 
     def execute(self, context):
-        print("Changes checked")
+        parts_to_check = []
+        settings = context.scene.bp_settings
+
+        if settings.scope_mode == "All":
+            parts_to_check = [o for o in context.scene.objects if o.type == 'MESH']
+
+        elif settings.scope_mode == "Selected":
+            parts_to_check = [o for o in bpy.context.selected_objects if o.type == "MESH"]
+
+        bbox = get_bbox(self, parts_to_check)
+        materials = get_materials(self, parts_to_check)
+        uv_islands = get_uv_islands(self, parts_to_check)
+
+        print(f"New data: {bbox}, {materials}. {uv_islands}")
+
+        current_selected = settings.mesh_states[settings.mesh_states_index]
+        json_file = current_selected.json_path
+        with open(json_file, "r") as read_file:
+            state_data = json.load(read_file)
+            print(f"{state_data}")
+
+        changes = 0
+        print(f"State data (old): {state_data}")
+
+        # BBOX CHANGE
+        state_bbox = state_data["bbox"]
+        threshold = CONFIG["bbox_threshold"]
+        for old_val, new_val in zip(state_bbox, bbox):
+            if old_val == 0:
+                continue
+            diff = abs(new_val - old_val) / abs(old_val) * 100
+            if diff > threshold:
+                settings.change_count += 1
+                break
+
+        # MATERIALS CHANGE
+        state_materials = state_data["materials"]
+        if state_materials != materials:
+            settings.change_count += 1
+
+        # UVS CHANGE
+        state_uvs = state_data["uv_islands"]
+        threshold = CONFIG["uv_islands_threshold"]
+
+        limit_min = state_uvs - threshold
+        limit_max = state_uvs + threshold
+
+        if uv_islands < limit_min or uv_islands > limit_max:
+            settings.change_count += 1
+
+        print(f"Changes: {changes}")
+
+        return ({'FINISHED'})
 
 class ExportAndBake(bpy.types.Operator):
     bl_idname = "bl.export_and_bake"
@@ -254,9 +341,13 @@ class SaveState(bpy.types.Operator):
         elif settings.scope_mode == "Selected":
             to_export = bpy.context.selected_objects
 
-        output_directory = os.path.join(settings.output_path, "bp_bridge_output")
-        for (root, dirs, files) in os.walk(output_directory, topdown=True):
-            filenames = files
+        output_directory = os.path.join(settings.output_path, "bp_bridge_output", "mesh_states")
+        if os.path.exists(output_directory):
+            for (root, dirs, files) in os.walk(output_directory, topdown=True):
+                filenames = files
+        else:
+            filenames = []
+
 
         if settings.mesh_state_name == "":
             self.report({"WARNING"}, "No mesh state name chosen.")
@@ -271,13 +362,13 @@ class SaveState(bpy.types.Operator):
             os.makedirs(output_directory)
 
         try:
-            bbox = self.get_bbox(to_export)
-            materials = self.get_materials(to_export)
-            uv_islands = self.get_uv_islands(to_export)
+            bbox = get_bbox(self, to_export)
+            materials = get_materials(self, to_export)
+            uv_islands = get_uv_islands(self, to_export)
             print(f"UV islands: {uv_islands}")
             json_path = self.save_data(output_directory, assetname, bbox, materials, uv_islands)
         except Exception as e:
-            self.report({"ERROR"}, "Failed to save mesh state.")
+            self.report({"ERROR"}, f"Failed to save mesh state: {e}")
             return({"CANCELLED"})
 
         filename = os.path.join(output_directory, assetname) + ".fbx"
@@ -292,58 +383,6 @@ class SaveState(bpy.types.Operator):
 
         return {"FINISHED"}
 
-    def get_bbox(self, mesh_parts):
-        try:
-            x_values = []
-            y_values = []
-            z_values = []
-
-            for object in mesh_parts:
-                for corner in object.bound_box:
-                    world_corner = object.matrix_world @ Vector(corner)
-                    x_values.append(world_corner.x)
-                    y_values.append(world_corner.y)
-                    z_values.append(world_corner.z)
-            total_width = max(x_values) - min(x_values)
-            total_height = max(y_values) - min(y_values)
-            total_depth = max(z_values) - min(z_values)
-
-            full_bbox = [total_width, total_height, total_depth]
-        except Exception as e:
-            self.report({"ERROR"}, str(e))
-            return ({"CANCELLED"})
-
-        return full_bbox
-
-    def get_materials(self, mesh_parts):
-        try:
-            materials = []
-            for object in mesh_parts:
-                for material in object.material_slots:
-                    if  material.name not in materials:
-                        materials.append(material.name)
-        except Exception as e:
-            self.report({"ERROR"}, str(e))
-            return ({"CANCELLED"})
-
-        return materials
-
-    def get_uv_islands(self, mesh_parts):
-        try:
-            islands = 0
-            for object in mesh_parts:
-                bm = bmesh.new()
-                bm.from_mesh(object.data)
-
-                uv_layer = bm.loops.layers.uv[object.data.uv_layers.active.name]
-
-                islands += len(bmesh_utils.bmesh_linked_uv_islands(bm, uv_layer))
-        except Exception as e:
-            self.report({"ERROR"}, str(e))
-            return ({"CANCELLED"})
-
-        return islands
-
     def save_data(self, output_directory, asset_name, bbox, materials, uv_islands):
         data = {}
 
@@ -356,6 +395,57 @@ class SaveState(bpy.types.Operator):
 
         return json_filename
 
+def get_bbox(operator, mesh_parts):
+    try:
+        x_values = []
+        y_values = []
+        z_values = []
+
+        for object in mesh_parts:
+            for corner in object.bound_box:
+                world_corner = object.matrix_world @ Vector(corner)
+                x_values.append(world_corner.x)
+                y_values.append(world_corner.y)
+                z_values.append(world_corner.z)
+        total_width = max(x_values) - min(x_values)
+        total_height = max(y_values) - min(y_values)
+        total_depth = max(z_values) - min(z_values)
+
+        full_bbox = [total_width, total_height, total_depth]
+    except Exception as e:
+        operator.report({"ERROR"}, str(e))
+        return ({"CANCELLED"})
+
+    return full_bbox
+
+def get_materials(operator, mesh_parts):
+    try:
+        materials = []
+        for object in mesh_parts:
+            for material in object.material_slots:
+                if  material.name not in materials:
+                    materials.append(material.name)
+    except Exception as e:
+        operator.report({"ERROR"}, str(e))
+        return ({"CANCELLED"})
+
+    return materials
+
+def get_uv_islands(operator, mesh_parts):
+    try:
+        islands = 0
+        for object in mesh_parts:
+            bm = bmesh.new()
+            bm.from_mesh(object.data)
+
+            uv_layer = bm.loops.layers.uv[object.data.uv_layers.active.name]
+
+            islands += len(bmesh_utils.bmesh_linked_uv_islands(bm, uv_layer))
+    except Exception as e:
+        operator.report({"ERROR"}, str(e))
+        return ({"CANCELLED"})
+
+    return islands
 
 class LoadState(bpy.types.Operator):
     bl_idname = "bl.load_state"
@@ -411,6 +501,7 @@ class RemoveState(bpy.types.Operator):
     
         
 def register():
+    bpy.utils.register_class(LoadConfig)
     bpy.utils.register_class(BPMeshState)
     bpy.utils.register_class(BP_UL_MeshStateList)
     bpy.utils.register_class(BPSettings)
@@ -424,6 +515,7 @@ def register():
     bpy.types.Scene.bp_settings = bpy.props.PointerProperty(type=BPSettings)
 
 def unregister():
+    bpy.utils.unregister_class(LoadConfig)
     bpy.utils.unregister_class(BPMeshState)
     bpy.utils.UNregister_class(BP_UL_MeshStateList)
     del bpy.types.Scene.bp_settings
