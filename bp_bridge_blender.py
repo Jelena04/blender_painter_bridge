@@ -24,6 +24,8 @@ CONFIG = {
             "uv_islands_threshold": 2
 }
 
+PAINTER_PATH = r"C:\Program Files\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"
+
 class LoadConfig(bpy.types.Operator):
     bl_idname = "bl.load_config"
     bl_label = "Load Config"
@@ -313,8 +315,15 @@ class ExportAndBake(bpy.types.Operator):
     bl_label = "ExportMeshes"
 
     def execute(self, context):
+        settings = bpy.context.scene.bp_settings
         print("Export and Bake executed")
 
+        file_low, file_high, mesh_name = self.export_meshes(context)
+        self.create_task(file_low, file_high, mesh_name)
+
+        return {"FINISHED"}
+
+    def export_meshes(self, context):
         mesh_parts_to_export = []
         settings = context.scene.bp_settings
 
@@ -336,7 +345,7 @@ class ExportAndBake(bpy.types.Operator):
             elif suffix_high in obj.name:
                 high_poly_parts.append(obj)
 
-        output_directory = os.path.join(settings.output_path, "bp_bridge_output")
+        output_directory = os.path.join(settings.output_path, "bp_bridge_output", "meshes")
 
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
@@ -351,23 +360,58 @@ class ExportAndBake(bpy.types.Operator):
         # export low poly
         for lp_part in low_poly_parts:
             lp_part.select_set(True)
-        filename = os.path.join(output_directory, assetname) + "_low.fbx"
-        bpy.ops.export_scene.fbx(filepath=filename, use_selection=True, use_triangles=True)
+        filename_low = os.path.join(output_directory, assetname) + "_low.fbx"
+        bpy.ops.export_scene.fbx(filepath=filename_low, use_selection=True, use_triangles=True)
 
         bpy.ops.object.select_all(action='DESELECT')
 
         # export high poly
         for hp_part in high_poly_parts:
             hp_part.select_set(True)
-        filename = os.path.join(output_directory, assetname) + "_high.fbx"
-        bpy.ops.export_scene.fbx(filepath=filename, use_selection=True, use_mesh_modifiers=True)
+        filename_high = os.path.join(output_directory, assetname) + "_high.fbx"
+        bpy.ops.export_scene.fbx(filepath=filename_high, use_selection=True, use_mesh_modifiers=True)
 
         bpy.ops.object.select_all(action='DESELECT')
 
         print(f"Low poly: {low_poly_parts}")
         print(f"High poly: {high_poly_parts}")
 
-        return {"FINISHED"}
+        return filename_low, filename_high, assetname
+
+    def create_task(self, low_path, high_path, mesh_name):
+        settings = bpy.context.scene.bp_settings
+        output_path = os.path.join(settings.output_path, "bp_bridge_output", "tasks")
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
+        task = {}
+
+        if settings.spp_project == "New":
+            task["procedure"] = "use_new"
+        elif settings.spp_project == "UseOpen":
+            task["procedure"] = "use_open"
+
+        task["meshes"] = {
+            "low_path": low_path,
+            "high_path": high_path
+        }
+
+        task["mesh_maps"] = {
+            "normal": settings.bake_normal_map,
+            "ao": settings.bake_ao_map,
+            "curvature": settings.bake_curvature_map
+        }
+
+        with open(os.path.join(output_path, mesh_name + ".json"), "w") as write_file:
+            json.dump(task, write_file)
+        print("Task Created!")
+
+        if settings.spp_project == "New":
+            self.launch_spp()
+
+    def launch_spp(self):
+        subprocess.Popen([PAINTER_PATH])
+
 
 class SaveState(bpy.types.Operator):
     bl_idname = "bl.save_state"
