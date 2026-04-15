@@ -32,7 +32,6 @@ class PainterBridge:
         event.DISPATCHER.connect_strong(event.ProjectEditionEntered, self.on_project_ready)
         plugin_events.append((event.ProjectEditionEntered, self.on_project_ready))
         self.project_ready = False
-        print(f"Self.project_ready = {self.project_ready}")
 
         self.pending_bake = False
 
@@ -42,7 +41,6 @@ class PainterBridge:
 
     def on_project_ready(self, e: sp.event.Event):
         self.project_ready = True
-        print(f"Self.project_ready = {self.project_ready}")
 
     def on_timer_tick(self):
 
@@ -52,20 +50,16 @@ class PainterBridge:
             self.bake(self.high_path, self.normal, self.ao, self.curv)
             return
 
-        print("Checking for tasks")
-
         for (root, dirs, files) in os.walk(TASK_DIRECTORY):
             for file in files:
                 filepath = os.path.join(root, file)
                 with open(filepath, "r") as f:
                     task_data = json.load(f)
-                print(f"Task found! {file}")
                 os.remove(filepath)
 
                 self.process_task(task_data)
 
     def process_task(self, task_data):
-        print("Process task run.")
         low_path = task_data["meshes"]["low_path"]
         self.high_path = task_data["meshes"]["high_path"]
         self.suffix_low = task_data["suffixes"]["low"]
@@ -75,8 +69,6 @@ class PainterBridge:
         self.curv = task_data["mesh_maps"]["curvature"]
 
         spp_project = task_data["procedure"]
-
-        print(f"Task content: {task_data}")
 
         if spp_project == "use_new":
 
@@ -111,7 +103,7 @@ class PainterBridge:
         texture_sets = ts.all_texture_sets()
 
         for texture_set in texture_sets:
-            baking_params = sp.baking.BakingParameters.from_texture_set_name(texture_set.name())
+            baking_params = sp.baking.BakingParameters.from_texture_set_name(texture_set.name)
             common_params = baking_params.common()
 
             sp.baking.BakingParameters.set({
@@ -146,7 +138,6 @@ class PainterBridge:
 
 
 def start_plugin():
-    print("Plugin started")
     global my_plugin
     my_plugin = PainterBridge()
 
@@ -163,9 +154,6 @@ def close_plugin():
                 except:
                     pass
             plugin_events.clear()
-
-    print("Plugin closed")
-
 
 if __name__ == "__main__":
     start_plugin()
