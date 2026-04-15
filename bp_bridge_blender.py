@@ -28,6 +28,8 @@ PAINTER_PATH = r"C:\Program Files\Adobe\Adobe Substance 3D Painter\Adobe Substan
 class LoadConfig(bpy.types.Operator):
     bl_idname = "bl.load_config"
     bl_label = "Load Config"
+    bl_description = ("Reloads config file which states how much bbox is allowed to change (%) and amount of uv islands"
+                      " that are allowed to change before plugin sees them as risky.")
 
     def execute(self, context):
         global CONFIG
@@ -252,6 +254,10 @@ class BP_OT_CheckExistingStates(bpy.types.Operator):
 class CheckChanges(bpy.types.Operator):
     bl_idname = "bl.check_changes"
     bl_label = "CheckChanges"
+    bl_description = ("Checks for changes between the meshes in your scene (selected or all) and the mesh state you"
+                      "have selected."
+                      "Changes checked: bbox, material names/slots, nr of uv islands. These are the main aspects that"
+                      " could mess up Substance's layer assignment when rebaking.")
 
     def execute(self, context):
         parts_to_check = []
@@ -310,13 +316,14 @@ class CheckChanges(bpy.types.Operator):
 class ExportAndBake(bpy.types.Operator):
     bl_idname = "bl.export_and_bake"
     bl_label = "ExportMeshes"
+    bl_description = ("Exports high and low fbx's based on suffixes put in, creates a task for Substance Painter to"
+                      " process")
 
     def execute(self, context):
         settings = bpy.context.scene.bp_settings
 
         substance_open = False
 
-        # TODO replace this with something from a library or something that WORKS
         if "Adobe Substance 3D Painter.exe" in subprocess.check_output("tasklist", text=True):
             substance_open = True
         else:
@@ -331,6 +338,11 @@ class ExportAndBake(bpy.types.Operator):
         return {"FINISHED"}
 
     def export_meshes(self, context):
+        """
+        Exports a low and high fbx based on the suffixes put in by the user to the working directory, also chosen
+        by the user.
+        :return: Filepath to low fbx, filepath to high fbx, name of asset
+        """
         mesh_parts_to_export = []
         settings = context.scene.bp_settings
 
@@ -383,6 +395,13 @@ class ExportAndBake(bpy.types.Operator):
         return filename_low, filename_high, assetname
 
     def create_task(self, low_path, high_path, mesh_name):
+        """
+        Creates a task json for Substance Painter to read.
+        :param low_path: Path to low fbx file
+        :param high_path: Path to high fbx file
+        :param mesh_name: Name of the mesh
+        :return:
+        """
         settings = bpy.context.scene.bp_settings
         output_path = os.path.join(settings.output_path, "bp_bridge_output", "tasks")
         if not os.path.exists(output_path):
@@ -421,10 +440,10 @@ class ExportAndBake(bpy.types.Operator):
     def launch_spp(self):
         subprocess.Popen([PAINTER_PATH])
 
-
 class SaveState(bpy.types.Operator):
     bl_idname = "bl.save_state"
     bl_label = "SaveState"
+    bl_description = "Saves the current meshes (selected or all) as a mesh state."
 
     # controls the "mode" the operator is in
     overwrite: bpy.props.BoolProperty(default=False)
@@ -468,11 +487,9 @@ class SaveState(bpy.types.Operator):
             self.report({"ERROR"}, f"Failed to save mesh state: {e}")
             return({"CANCELLED"})
 
-        # save fbx
         filename = os.path.join(output_directory, assetname) + ".fbx"
         bpy.ops.export_scene.fbx(filepath=filename, use_selection=True, use_mesh_modifiers=True)
 
-        # update or create UIList entry
         if existing_index >= 0:
             item = settings.mesh_states[existing_index]
             item.fbx_path = filename
@@ -579,6 +596,7 @@ def get_uv_islands(operator, mesh_parts):
 class LoadState(bpy.types.Operator):
     bl_idname = "bl.load_state"
     bl_label = "LoadState"
+    bl_description = "Imports the currently selected mesh state into the scene."
 
     def execute(self, context):
         settings = context.scene.bp_settings
@@ -595,6 +613,7 @@ class LoadState(bpy.types.Operator):
 class RemoveState(bpy.types.Operator):
     bl_idname = "bl.remove_state"
     bl_label = "RemoveState"
+    bl_description = "Removes the selected mesh state from disk."
 
     def execute(self, context):
         settings = context.scene.bp_settings
@@ -623,7 +642,6 @@ def register():
     bpy.utils.register_class(SaveState)
     bpy.utils.register_class(LoadState)
     bpy.utils.register_class(RemoveState)
-    # bpy.utils.register_class(OpenSubstancePainter)
     bpy.utils.register_class(BlenderPainterBridge_PT_Main)
     bpy.types.Scene.bp_settings = bpy.props.PointerProperty(type=BPSettings)
 
@@ -640,7 +658,6 @@ def unregister():
     bpy.utils.unregister_class(SaveState)
     bpy.utils.unregister_class(LoadState)
     bpy.utils.unregister_class(RemoveState)
-    # bpy.utils.unregister_class(OpenSubstancePainter)
     bpy.utils.unregister_class(BPSettings)
 
 
