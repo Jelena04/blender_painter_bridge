@@ -164,13 +164,6 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
 
         box_setup.prop(settings, "output_path")
 
-        # SP PROJECT
-        layout.label(text="Substance Painter project")
-        box_project = layout.box()
-        project_row = box_project.row()
-        project_row.prop_enum(settings, "spp_project", "UseOpen")
-        project_row.prop_enum(settings, "spp_project", "New")
-
         # MESH STATES
         layout.label(text="Mesh States")
         box_states = layout.box()
@@ -190,36 +183,41 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         state_btns_row.operator("bl.load_state", text="Load")
         state_btns_row.operator("bl.remove_state", text="Remove")
 
-        # BAKING
-        layout.label(text="Baking")
-        box_baking = layout.box()
-        change_split = box_baking.split(factor=0.75)
+        change_split = box_states.split(factor=0.75)
         change_split.operator("bl.check_changes", text="Check Changes", icon="VIEWZOOM")
         change_split.operator("bl.load_config", text="Config", icon="FILE_REFRESH")
 
         if settings.change_count < 0:
-            data_box = box_baking.box()
+            data_box = box_states.box()
             status_row = data_box.row()
         elif  settings.change_count == 0:
-            data_box = box_baking.box()
+            data_box = box_states.box()
             status_row = data_box.row()
             status_row.label(text="Safe to reload", icon="STRIP_COLOR_04")
             data_box.label(text="Unlikely to affect layer assignments", icon="FAKE_USER_ON")
         elif settings.change_count == 1:
-            data_box = box_baking.box()
+            data_box = box_states.box()
             status_row = data_box.row()
             status_row.label(text="Reload with caution", icon="STRIP_COLOR_02")
             data_box.label(text="Rebaking may break layer assignments", icon="ERROR")
         elif settings.change_count >= 2:
-            data_box = box_baking.box()
+            data_box = box_states.box()
             status_row = data_box.row()
             status_row.label(text="Risky to reload", icon="STRIP_COLOR_01")
             data_box.label(text="Consider baking in a new .spp file", icon="ERROR")
 
+        # BAKING
+        layout.label(text="Baking")
+        box_baking = layout.box()
         box_baking.label(text="Mesh Maps")
         box_baking.prop(settings, "bake_normal_map")
         box_baking.prop(settings, "bake_ao_map")
         box_baking.prop(settings, "bake_curvature_map")
+
+        box_baking.label(text="Substance Painter Project")
+        project_row = box_baking.row()
+        project_row.prop_enum(settings, "spp_project", "UseOpen")
+        project_row.prop_enum(settings, "spp_project", "New")
 
         box_baking.operator("bl.export_and_bake", text="Export and Bake", icon="CHECKMARK")
 
