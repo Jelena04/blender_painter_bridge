@@ -15,6 +15,7 @@ from bpy_extras import bmesh_utils
 import bmesh
 import os
 import subprocess
+# import psutil
 
 from mathutils import Vector
 import json
@@ -316,6 +317,17 @@ class ExportAndBake(bpy.types.Operator):
 
     def execute(self, context):
         settings = bpy.context.scene.bp_settings
+
+        substance_open = False
+
+        print(os.popen("tasklist").read())
+        if "Adobe Substance 3D Painter.exe" in os.popen("tasklist").read():
+            substance_open = True
+
+        if settings.spp_project == "use_open" and not substance_open:
+            self.report({"WARNING"}, "No Substance project opened. Select 'Use new' to auto bake in a new .spp file.")
+            return {"CANCELLED"}
+
         print("Export and Bake executed")
 
         file_low, file_high, mesh_name = self.export_meshes(context)
@@ -360,7 +372,7 @@ class ExportAndBake(bpy.types.Operator):
         # export low poly
         for lp_part in low_poly_parts:
             lp_part.select_set(True)
-        filename_low = os.path.join(output_directory, assetname) + "_low.fbx"
+        filename_low = os.path.join(output_directory, assetname) + settings.suffix_low + ".fbx"
         bpy.ops.export_scene.fbx(filepath=filename_low, use_selection=True, use_triangles=True)
 
         bpy.ops.object.select_all(action='DESELECT')
@@ -368,7 +380,7 @@ class ExportAndBake(bpy.types.Operator):
         # export high poly
         for hp_part in high_poly_parts:
             hp_part.select_set(True)
-        filename_high = os.path.join(output_directory, assetname) + "_high.fbx"
+        filename_high = os.path.join(output_directory, assetname) + settings.suffix_high + ".fbx"
         bpy.ops.export_scene.fbx(filepath=filename_high, use_selection=True, use_mesh_modifiers=True)
 
         bpy.ops.object.select_all(action='DESELECT')
@@ -394,6 +406,11 @@ class ExportAndBake(bpy.types.Operator):
         task["meshes"] = {
             "low_path": low_path,
             "high_path": high_path
+        }
+
+        task["suffixes"] = {
+            "low": settings.suffix_low,
+            "high": settings.suffix_high
         }
 
         task["mesh_maps"] = {

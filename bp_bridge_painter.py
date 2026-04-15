@@ -1,41 +1,54 @@
 import json
 import os
 import threading
+from PySide6 import QtCore
 
 import substance_painter as sp
 import substance_painter.baking as baking
 import substance_painter.event as event
 import substance_painter.textureset as ts
 
-def on_baking_finished(e: sp.event.BakingProcessEnded):
-    if e.status == sp.baking.BakingStatus.Success:
-        print("Baking completed successfully!")
-    elif e.status == sp.baking.BakingStatus.Cancel:
-        print("Baking was cancelled.")
-    else:
-        print("Baking failed.")
-
 plugin_events = []
 
-class PainterBridge():
+class PainterBridge:
     def __init__(self):
         print("PainterBridge initialized!")
 
-        self.pending_high_path = None
-        self.pending_normal = False
-        self.pending_ao = False
-        self.pending_curv = False
+        self.high_path = None
+        self.suffix_low = None
+        self.suffix_high = None
+        self.normal = False
+        self.ao = False
+        self.curv = False
+
+        self.timer = QtCore.QTimer()
+        self.timer.setInterval(2000)
+        self.timer.timeout.connect(self.on_timer_tick)
+        self.timer.start()
+        self.running = True
 
         event.DISPATCHER.connect_strong(event.ProjectEditionEntered, self.on_project_ready)
         plugin_events.append((event.ProjectEditionEntered, self.on_project_ready))
-        # self.ready = False
-        event.DISPATCHER.connect_strong(event.BakingProcessEnded, on_baking_finished)
-        plugin_events.append((event.BakingProcessEnded, on_baking_finished))
+        self.project_ready = False
+        print(f"Self.project_ready = {self.project_ready}")
 
-        self.run_task_checking()
+        self.pending_bake = False
 
-    def check_for_tasks(self):
+        event.DISPATCHER.connect_strong(event.BakingProcessEnded, self.on_baking_finished)
+        plugin_events.append((event.BakingProcessEnded, self.on_baking_finished))
+
+
+    def on_project_ready(self, e: sp.event.Event):
+        self.project_ready = True
+        print(f"Self.project_ready = {self.project_ready}")
+
+    def on_timer_tick(self):
         task_directory = r"C:\Users\jelen\Desktop\personal\blender_painter_bridge\bp_bridge_output\tasks"
+
+        if self.pending_bake and self.project_ready:
+            self.pending_bake = False
+            self.bake(self.high_path, self.normal, self.ao, self.curv)
+            return
 
         print("Checking for tasks")
 
@@ -45,30 +58,25 @@ class PainterBridge():
                 with open(filepath, "r") as f:
                     task_data = json.load(f)
                 print(f"Task found! {file}")
-                # os.remove(filepath)
+                os.remove(filepath)
 
-                # if self.ready:
-                sp.project.execute_when_not_busy(lambda t=task_data: self.process_task(t))
-
-    def run_task_checking(self):
-        self.check_for_tasks()
-        threading.Timer(2, self.run_task_checking).start()
+                self.process_task(task_data)
 
     def process_task(self, task_data):
+        print("Process task run.")
         low_path = task_data["meshes"]["low_path"]
-        high_path = task_data["meshes"]["high_path"]
-
-        self.pending_high_path = high_path
-        self.pending_normal = task_data["mesh_maps"]["normal"]
-        self.pending_ao = task_data["mesh_maps"]["ao"]
-        self.pending_curv = task_data["mesh_maps"]["curvature"]
+        self.high_path = task_data["meshes"]["high_path"]
+        self.suffix_low = task_data["suffixes"]["low"]
+        self.suffix_high = task_data["suffixes"]["high"]
+        self.normal = task_data["mesh_maps"]["normal"]
+        self.ao = task_data["mesh_maps"]["ao"]
+        self.curv = task_data["mesh_maps"]["curvature"]
 
         spp_project = task_data["procedure"]
 
+        print(f"Task content: {task_data}")
+
         if spp_project == "use_new":
-            if sp.project.is_open():
-                print("A project is already open, cannot create a new one.")
-                return
 
             project_settings = sp.project.Settings(
                 import_cameras=False,
@@ -76,27 +84,21 @@ class PainterBridge():
                 normal_map_format=sp.project.NormalMapFormat.DirectX
             )
             sp.project.create(mesh_file_path=low_path, settings=project_settings)
+            self.pending_bake = True
 
         elif spp_project == "use_open":
-            if not sp.project.is_open():
-                print("No project is open.")
-                return
 
             mesh_reloading_settings = sp.project.MeshReloadingSettings(
                 import_cameras=False,
                 preserve_strokes=False
             )
-            sp.project.reload_mesh(low_path, mesh_reloading_settings, self.on_mesh_reload)
 
-    def on_project_ready(self, e: sp.event.ProjectEditionEntered):
-        self.ready = True
-        if self.pending_high_path:
-            self.bake(self.pending_high_path, self.pending_normal, self.pending_ao, self.pending_curv)
+            sp.project.reload_mesh(low_path, mesh_reloading_settings, self.on_mesh_reload)
 
     def on_mesh_reload(self, status: sp.project.ReloadMeshStatus):
         if status == sp.project.ReloadMeshStatus.SUCCESS:
             print("Mesh reloaded successfully, starting bake...")
-            self.bake(self.pending_high_path, self.pending_normal, self.pending_ao, self.pending_curv)
+            self.bake(self.high_path, self.normal, self.ao, self.curv)
         else:
             print("Mesh reload failed.")
 
@@ -111,7 +113,9 @@ class PainterBridge():
             common_params = baking_params.common()
 
             sp.baking.BakingParameters.set({
-                common_params["HipolyMesh"]: highpoly_url
+                common_params["HipolyMesh"]: highpoly_url,
+                common_params["LowpolySuffix"]: self.suffix_low,
+                common_params["HipolySuffix"]: self.suffix_high,
             })
 
             enabled_maps = []
@@ -126,18 +130,33 @@ class PainterBridge():
 
         sp.baking.bake_selected_textures_async()
 
-        self.pending_high_path = None
+    def on_baking_finished(self, e: sp.event.Event):
+        if e.status == sp.baking.BakingStatus.Success:
+            print("Baking completed successfully!")
+        elif e.status == sp.baking.BakingStatus.Cancel:
+            print("Baking was cancelled.")
+        else:
+            print("Baking failed.")
+
+    def stop(self):
+        self.running = False
+        self.timer.stop()
 
 
 def start_plugin():
     print("Plugin started")
+    global my_plugin
     my_plugin = PainterBridge()
 
 
 def close_plugin():
+    global my_plugin
+    my_plugin.stop()
+
     for evt, cb in plugin_events:
         event.DISPATCHER.disconnect(evt, cb)
     plugin_events.clear()
+
     print("Plugin closed")
 
 
