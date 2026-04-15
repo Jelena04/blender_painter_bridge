@@ -1,4 +1,12 @@
-from numpy.distutils.system_info import lapack_ilp64_opt_info
+import bpy
+from bpy_extras import bmesh_utils
+import bmesh
+
+import os
+import subprocess
+
+from mathutils import Vector
+import json
 
 bl_info = {
     "name": "Blender Painter Bridge",
@@ -9,16 +17,6 @@ bl_info = {
     "wiki_url": "https://www.artstation.com/jelenarombouts2",
     "category": "Import-Export"
     }
-
-import bpy
-from bpy_extras import bmesh_utils
-import bmesh
-import os
-import subprocess
-# import psutil
-
-from mathutils import Vector
-import json
 
 CONFIG = {
             "bbox_threshold": 10,
@@ -320,15 +318,14 @@ class ExportAndBake(bpy.types.Operator):
 
         substance_open = False
 
-        print(os.popen("tasklist").read())
-        if "Adobe Substance 3D Painter.exe" in os.popen("tasklist").read():
+        # TODO replace this with something from a library or something that WORKS
+        if "Adobe Substance 3D Painter.exe" in subprocess.check_output("tasklist", text=True):
             substance_open = True
+        else:
+            substance_open = False
 
-        if settings.spp_project == "use_open" and not substance_open:
-            self.report({"WARNING"}, "No Substance project opened. Select 'Use new' to auto bake in a new .spp file.")
-            return {"CANCELLED"}
-
-        print("Export and Bake executed")
+        if settings.spp_project == "UseOpen" and not substance_open:
+            self.report({"WARNING"}, "No Substance project open, use 'Use New' to auto bake in a new .spp file")
 
         file_low, file_high, mesh_name = self.export_meshes(context)
         self.create_task(file_low, file_high, mesh_name)
@@ -384,9 +381,6 @@ class ExportAndBake(bpy.types.Operator):
         bpy.ops.export_scene.fbx(filepath=filename_high, use_selection=True, use_mesh_modifiers=True)
 
         bpy.ops.object.select_all(action='DESELECT')
-
-        print(f"Low poly: {low_poly_parts}")
-        print(f"High poly: {high_poly_parts}")
 
         return filename_low, filename_high, assetname
 
@@ -573,15 +567,15 @@ def get_uv_islands(operator, mesh_parts):
         islands = 0
         for object in mesh_parts:
             bm = bmesh.new()
-            bm.from_mesh(object.data)
-
-            uv_layer = bm.loops.layers.uv[object.data.uv_layers.active.name]
-
-            islands += len(bmesh_utils.bmesh_linked_uv_islands(bm, uv_layer))
+            try:
+                bm.from_mesh(object.data)
+                uv_layer = bm.loops.layers.uv[object.data.uv_layers.active.name]
+                islands += len(bmesh_utils.bmesh_linked_uv_islands(bm, uv_layer))
+            finally:
+                bm.free()
     except Exception as e:
         operator.report({"ERROR"}, str(e))
-        return ({"CANCELLED"})
-
+        return 0
     return islands
 
 class LoadState(bpy.types.Operator):
@@ -593,7 +587,9 @@ class LoadState(bpy.types.Operator):
 
         selected_state = settings.mesh_states_index
 
-        bpy.ops.import_scene.fbx(filepath=settings.mesh_states[selected_state].fbx_path)
+        if settings.mesh_states_index >= 0 and settings.mesh_states_index < len(settings.mesh_states):
+            current_selected = settings.mesh_states[settings.mesh_states_index]
+            bpy.ops.import_scene.fbx(filepath=current_selected.fbx_path)
 
         print("State loaded")
         return {"FINISHED"}
@@ -617,26 +613,6 @@ class RemoveState(bpy.types.Operator):
         print("State loaded")
         return {"FINISHED"}
 
-# class OpenSubstancePainter(bpy.types.Operator):
-#     bl_idname = "bl.open_spp"
-#     bl_label = "Open Substance Painter Project"
-#
-#     def execute(self, context):
-#         settings = context.scene.bp_settings
-#         spp_path = bpy.path.abspath(settings.painter_path)
-#
-#         if not spp_path.lower().endswith(".spp"):
-#             self.report({'ERROR'}, "Please select a valid .spp file")
-#             return {'CANCELLED'}
-#
-#         if not os.path.exists(spp_path):
-#             self.report({'ERROR'}, "File does not exist")
-#             return {'CANCELLED'}
-#
-#         subprocess.Popen([PAINTER_EXE, spp_path])
-#         return {'FINISHED'}
-
-
 def register():
     bpy.utils.register_class(LoadConfig)
     bpy.utils.register_class(BP_OT_CheckExistingStates)
@@ -657,7 +633,7 @@ def unregister():
     bpy.utils.unregister_class(LoadConfig)
     bpy.utils.unregister_class(BP_OT_CheckExistingStates)
     bpy.utils.unregister_class(BPMeshState)
-    bpy.utils.UNregister_class(BP_UL_MeshStateList)
+    bpy.utils.unregister_class(BP_UL_MeshStateList)
     del bpy.types.Scene.bp_settings
     bpy.utils.unregister_class(BlenderPainterBridge_PT_Main)
     bpy.utils.unregister_class(MY_OT_overwrite)

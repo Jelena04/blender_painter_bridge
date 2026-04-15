@@ -10,6 +10,8 @@ import substance_painter.textureset as ts
 
 plugin_events = []
 
+TASK_DIRECTORY =  r"C:\Users\jelen\Desktop\personal\blender_painter_bridge\bp_bridge_output\tasks"
+
 class PainterBridge:
     def __init__(self):
         print("PainterBridge initialized!")
@@ -43,7 +45,7 @@ class PainterBridge:
         print(f"Self.project_ready = {self.project_ready}")
 
     def on_timer_tick(self):
-        task_directory = r"C:\Users\jelen\Desktop\personal\blender_painter_bridge\bp_bridge_output\tasks"
+
 
         if self.pending_bake and self.project_ready:
             self.pending_bake = False
@@ -52,7 +54,7 @@ class PainterBridge:
 
         print("Checking for tasks")
 
-        for (root, dirs, files) in os.walk(task_directory):
+        for (root, dirs, files) in os.walk(TASK_DIRECTORY):
             for file in files:
                 filepath = os.path.join(root, file)
                 with open(filepath, "r") as f:
@@ -151,11 +153,16 @@ def start_plugin():
 
 def close_plugin():
     global my_plugin
-    my_plugin.stop()
-
-    for evt, cb in plugin_events:
-        event.DISPATCHER.disconnect(evt, cb)
-    plugin_events.clear()
+    if my_plugin:
+        try:
+            my_plugin.stop()
+        finally:
+            for evt, cb in plugin_events:
+                try:
+                    event.DISPATCHER.disconnect(evt, cb)
+                except:
+                    pass
+            plugin_events.clear()
 
     print("Plugin closed")
 
