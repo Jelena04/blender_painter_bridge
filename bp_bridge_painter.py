@@ -43,8 +43,6 @@ class PainterBridge:
         self.project_ready = True
 
     def on_timer_tick(self):
-
-
         if self.pending_bake and self.project_ready:
             self.pending_bake = False
             self.bake(self.high_path, self.normal, self.ao, self.curv)
@@ -133,9 +131,15 @@ class PainterBridge:
             print("Baking failed.")
 
     def stop(self):
-        self.running = False
-        self.timer.stop()
-
+        try:
+            if self.timer and self.timer.isActive():
+                self.timer.timeout.disconnect()
+                self.timer.stop()
+                self.timer.deleteLater()
+        except Exception as e:
+            print(f"Exception stopping timer: {e}")
+        finally:
+            self.running = False
 
 def start_plugin():
     global my_plugin
@@ -147,13 +151,18 @@ def close_plugin():
     if my_plugin:
         try:
             my_plugin.stop()
+        except Exception as e:
+            print(f"Error stopping plugin: {e}")
         finally:
             for evt, cb in plugin_events:
                 try:
                     event.DISPATCHER.disconnect(evt, cb)
-                except:
+                except Exception as e:
+                    print(f"Error disconnecting event: {e}")
                     pass
             plugin_events.clear()
+
+        my_plugin = None
 
 if __name__ == "__main__":
     start_plugin()
