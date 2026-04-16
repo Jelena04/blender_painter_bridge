@@ -32,6 +32,9 @@ class LoadConfig(bpy.types.Operator):
                       " that are allowed to change before plugin sees them as risky.")
 
     def execute(self, context):
+        """
+        Loads check_config.json from the add-on directory. Falls back to default thresholds if the file is missing.
+        """
         global CONFIG
         config_path = os.path.join(os.path.dirname(__file__), "check_config.json")
         if os.path.exists(config_path):
@@ -149,6 +152,11 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
+        """
+        Draws the add-on's UI.
+        :param context:
+        :return:
+        """
         layout = self.layout
         settings = context.scene.bp_settings
 
@@ -170,7 +178,6 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         layout.label(text="Mesh States")
         box_states = layout.box()
         box_states.prop(settings, "mesh_state_name", text="Name")
-        # box_states.prop(settings, "mesh_states", text="States")
         box_states.template_list(
             "BP_UL_MeshStateList",  # UIList class name
             "",  # list ID (empty because i'm only using 1)
@@ -191,7 +198,7 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
 
         if settings.change_count < 0:
             data_box = box_states.box()
-            status_row = data_box.row()
+            data_box.row()
         elif  settings.change_count == 0:
             data_box = box_states.box()
             status_row = data_box.row()
@@ -228,7 +235,10 @@ class BP_OT_CheckExistingStates(bpy.types.Operator):
     bl_label = "Check Existing Mesh States"
 
     def execute(self, context):
-        print("RUN!")
+        """
+        Scans the user's working directory (put it via UI) for existing .fbx/.json pairs and registers them in the
+        scene's mesh_states collection.
+        """
         settings = context.scene.bp_settings
 
         directory = os.path.join(settings.output_path, "bp_bridge_output", "mesh_states")
@@ -240,7 +250,6 @@ class BP_OT_CheckExistingStates(bpy.types.Operator):
         for file in os.listdir(directory):
             if file.endswith(".fbx"):
                 name = file[:-4]  # remove .fbx
-                print(name)
                 json_path = os.path.join(directory, name + ".json")
                 fbx_path = os.path.join(directory, file)
 
@@ -260,6 +269,11 @@ class CheckChanges(bpy.types.Operator):
                       " could mess up Substance's layer assignment when rebaking.")
 
     def execute(self, context):
+        """
+        Compares the current scene meshes against the selected mesh state's saved data.
+        Increments change_count for each category (bbox, materials, UV islands) that exceeds its configured threshold,
+        which is then used by the panel to display a risk level to the user.
+        """
         parts_to_check = []
         settings = context.scene.bp_settings
 
@@ -274,14 +288,10 @@ class CheckChanges(bpy.types.Operator):
         materials = get_materials(self, parts_to_check)
         uv_islands = get_uv_islands(self, parts_to_check)
 
-        print(f"New data: {bbox}, {materials}. {uv_islands}")
-
         current_selected = settings.mesh_states[settings.mesh_states_index]
         json_file = current_selected.json_path
         with open(json_file, "r") as read_file:
             state_data = json.load(read_file)
-
-        print(f"State data (old): {state_data}")
 
         # BBOX CHANGE
         state_bbox = state_data["bbox"]
@@ -320,6 +330,11 @@ class ExportAndBake(bpy.types.Operator):
                       " process")
 
     def execute(self, context):
+        """
+        Entry point for the Export and Bake workflow. Checks whether Substance Painter is already running (required
+        when using an open project), exports the low and high poly meshes, then creates a task file for Substance
+        Painter to pick up.
+        """
         settings = bpy.context.scene.bp_settings
 
         substance_open = False
@@ -438,6 +453,9 @@ class ExportAndBake(bpy.types.Operator):
             self.launch_spp()
 
     def launch_spp(self):
+        """
+        Launches Substance Painter as a subprocess using the configured executable path.
+        """
         subprocess.Popen([PAINTER_PATH])
 
 class SaveState(bpy.types.Operator):
@@ -449,6 +467,13 @@ class SaveState(bpy.types.Operator):
     overwrite: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
+        """
+        Saves the current mesh scope as a named state: exports a .fbx snapshot and a .json file containing bbox,
+        material, and UV island data. If a state with the same name already exists on disk, prompts the user to confirm
+        an overwrite. Updates the mesh_states collection entry if the state already exists, or adds a new one.
+        :param context:
+        :return:
+        """
         settings = context.scene.bp_settings
 
         # determine what objects to export
@@ -510,6 +535,10 @@ class SaveState(bpy.types.Operator):
         return -1
 
     def save_data(self, output_directory, asset_name, bbox, materials, uv_islands):
+        """
+        Serialises bbox, material, and UV island data to a .json file in the mesh states directory.
+        :return: path to .json file
+        """
         data = {}
 
         data["bbox"] = bbox
@@ -528,6 +557,9 @@ class MY_OT_overwrite(bpy.types.Operator):
     asset_name: bpy.props.StringProperty()
 
     def execute(self, context):
+        """
+        Re-runs SaveState with overwrite=True after the user confirms the dialog.
+        """
         settings = context.scene.bp_settings
         settings.mesh_state_name = self.asset_name
         bpy.ops.bl.save_state(overwrite=True)
@@ -542,6 +574,10 @@ class MY_OT_overwrite(bpy.types.Operator):
         layout.label(text="Do you want to overwrite that state?")
 
 def get_bbox(operator, mesh_parts):
+    """
+    Computes the combined world-space bounding box of all given mesh objects.
+    :return: [width, height, depth]
+    """
     try:
         x_values = []
         y_values = []
@@ -565,6 +601,10 @@ def get_bbox(operator, mesh_parts):
     return full_bbox
 
 def get_materials(operator, mesh_parts):
+    """
+    Collects the unique material slot names across all given mesh objects.
+    :return: List of unique material name strings
+    """
     try:
         materials = []
         for object in mesh_parts:
@@ -578,6 +618,10 @@ def get_materials(operator, mesh_parts):
     return materials
 
 def get_uv_islands(operator, mesh_parts):
+    """
+    Counts the total number of UV islands across all given mesh objecs using bmesh.
+    :return: Total island count as an int, or 0 if an error occurs.
+    """
     try:
         islands = 0
         for object in mesh_parts:
@@ -599,6 +643,9 @@ class LoadState(bpy.types.Operator):
     bl_description = "Imports the currently selected mesh state into the scene."
 
     def execute(self, context):
+        """
+        Imports the .fbx of the currently selected mesh state back into the scene.
+        """
         settings = context.scene.bp_settings
 
         selected_state = settings.mesh_states_index
@@ -616,6 +663,9 @@ class RemoveState(bpy.types.Operator):
     bl_description = "Removes the selected mesh state from disk."
 
     def execute(self, context):
+        """
+        Deletes the selected mesh state's .fbx and .json files from disk and removes it from the collection.
+        """
         settings = context.scene.bp_settings
 
         selected_state = settings.mesh_states_index

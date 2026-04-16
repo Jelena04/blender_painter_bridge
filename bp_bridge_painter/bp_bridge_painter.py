@@ -14,7 +14,11 @@ TASK_DIRECTORY =  r"C:\Users\jelen\Desktop\personal\blender_painter_bridge\bp_br
 
 class PainterBridge:
     def __init__(self):
-        print("PainterBridge initialized!")
+        """
+        Initialises the bridge: sets up baking state variables, starts the timer, and registers event listeners for
+        project readiness and baking completion.
+        """
+        print("Painter Bridge initialised!")
 
         self.high_path = None
         self.suffix_low = None
@@ -40,9 +44,17 @@ class PainterBridge:
 
 
     def on_project_ready(self, e: sp.event.Event):
+        """
+        Flags that the project has finished loading and is ready for baking operations.
+        """
         self.project_ready = True
 
     def on_timer_tick(self):
+        """
+        Polling callback fired every 2 seconds. If a bake was deferred because the project wasn't ready yet, it
+        triggers it now. Otherwise, it scans the task directory for new .json task files, processes each one, and
+        deletes it.
+        """
         if self.pending_bake and self.project_ready:
             self.pending_bake = False
             self.bake(self.high_path, self.normal, self.ao, self.curv)
@@ -58,6 +70,11 @@ class PainterBridge:
                 self.process_task(task_data)
 
     def process_task(self, task_data):
+        """
+        Entry point for processing a baking task from external data.
+        Extracts mesh paths, suffixes, and mesh map settings from the provided task data dictionary, then either
+        creates a new Substance Painter project or reloads an existing mesh depending on the specified procedure.
+        """
         low_path = task_data["meshes"]["low_path"]
         self.high_path = task_data["meshes"]["high_path"]
         self.suffix_low = task_data["suffixes"]["low"]
@@ -88,6 +105,11 @@ class PainterBridge:
             sp.project.reload_mesh(low_path, mesh_reloading_settings, self.on_mesh_reload)
 
     def on_mesh_reload(self, status: sp.project.ReloadMeshStatus):
+        """
+        Callback executed after attampting to reload a mesh in the current project.
+        If the reload is successful, triggers the baking process using previously stored configuration. Otherwise,
+        logs a failure message.
+        """
         if status == sp.project.ReloadMeshStatus.SUCCESS:
             print("Mesh reloaded successfully, starting bake...")
             self.bake(self.high_path, self.normal, self.ao, self.curv)
@@ -95,6 +117,11 @@ class PainterBridge:
             print("Mesh reload failed.")
 
     def bake(self, high_path, normal, ao, curv):
+        """
+        Configures and starts asynchronous mesh map baking for all texture sets.
+        For each texture set in the current project, this method assigns the high-poly mesh, sets naming suffixes,
+        enables selected mesh maps, and triggers the baking process.
+        """
         from PySide6 import QtCore
         highpoly_url = QtCore.QUrl.fromLocalFile(high_path).toString()
 
@@ -123,6 +150,10 @@ class PainterBridge:
         sp.baking.bake_selected_textures_async()
 
     def on_baking_finished(self, e: sp.event.Event):
+        """
+        Callbac triggered when the baking process completes.
+        Evaluates the baking status and logs the result to the console.
+        """
         if e.status == sp.baking.BakingStatus.Success:
             print("Baking completed successfully!")
         elif e.status == sp.baking.BakingStatus.Cancel:
@@ -131,6 +162,12 @@ class PainterBridge:
             print("Baking failed.")
 
     def stop(self):
+        """
+        Stops the plugin's internal timer and halts execution.
+        Safely disconnects the timer signal, stops the timer if active, and ensures proper cleanup to avoid dangling
+        Qt objects.
+        :return:
+        """
         try:
             if self.timer and self.timer.isActive():
                 self.timer.timeout.disconnect()
@@ -142,11 +179,19 @@ class PainterBridge:
             self.running = False
 
 def start_plugin():
+    """
+    Initializes and starts the Substance Painter plugin instance.
+    Creates a global instance of the PainterBridge class, making it accessible for the plugin lifecycle.
+    """
     global my_plugin
     my_plugin = PainterBridge()
 
-
 def close_plugin():
+    """
+    Cleans up and shuts down the plugin instance.
+    Stops the active plugin, disconnects all registered event callbacks, clears the event registry, and removes the
+    global plugin reference.
+    """
     global my_plugin
     if my_plugin:
         try:
