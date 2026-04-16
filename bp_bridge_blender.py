@@ -24,6 +24,7 @@ CONFIG = {
 }
 
 PAINTER_PATH = r"C:\Program Files\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"
+CONFIG_PATH = r"C:\Users\jelen\Desktop\personal\blender_painter_bridge\blender_painter_project\check_config.json"
 
 class LoadConfig(bpy.types.Operator):
     bl_idname = "bl.load_config"
@@ -36,7 +37,7 @@ class LoadConfig(bpy.types.Operator):
         Loads check_config.json from the add-on directory. Falls back to default thresholds if the file is missing.
         """
         global CONFIG
-        config_path = os.path.join(os.path.dirname(__file__), "check_config.json")
+        config_path = CONFIG_PATH
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
                 CONFIG = json.load(f)
@@ -197,8 +198,7 @@ class BlenderPainterBridge_PT_Main(bpy.types.Panel):
         change_split.operator("bl.load_config", text="Config", icon="FILE_REFRESH")
 
         if settings.change_count < 0:
-            data_box = box_states.box()
-            data_box.row()
+            pass
         elif  settings.change_count == 0:
             data_box = box_states.box()
             status_row = data_box.row()

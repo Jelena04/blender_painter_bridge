@@ -3,10 +3,6 @@
   "version": "1.0.",
   "description": "Serves as Substance Painter part of a Blender to SP plugin. Checks for tasks and processes them according to the instructions they hold.",
   "author": "Jelena Rombouts",
-  "host": {
-    "name": "Substance Painter",
-    "version": "Tested on v12.0.2"
-  },
   "enabled": true,
   "api_version": "0.3.5"
 }
